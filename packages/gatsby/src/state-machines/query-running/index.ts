@@ -3,11 +3,6 @@ import { IQueryRunningContext } from "./types"
 import { queryRunningServices } from "./services"
 import { queryActions } from "./actions"
 
-const extractQueriesIfDirty = {
-  cond: (ctx: IQueryRunningContext): boolean => !!ctx.filesDirty,
-  target: `extractingQueries`,
-}
-
 export const queryStates: MachineConfig<IQueryRunningContext, any, any> = {
   initial: `extractingQueries`,
   states: {
@@ -18,7 +13,7 @@ export const queryStates: MachineConfig<IQueryRunningContext, any, any> = {
         src: `extractQueries`,
         onDone: [
           {
-            actions: `resetGraphQlRunner`,
+            actions: `resetGraphQLRunner`,
             target: `writingRequires`,
           },
         ],
@@ -34,12 +29,6 @@ export const queryStates: MachineConfig<IQueryRunningContext, any, any> = {
       },
     },
     calculatingDirtyQueries: {
-      // Disabled because we're not watching for node mutations
-      // at the moment
-      // on: {
-      //   "": extractQueriesIfDirty,
-      //   SOURCE_FILE_CHANGED,
-      // },
       invoke: {
         id: `calculating-dirty-queries`,
         src: `calculateDirtyQueries`,
@@ -50,9 +39,6 @@ export const queryStates: MachineConfig<IQueryRunningContext, any, any> = {
       },
     },
     runningStaticQueries: {
-      on: {
-        "": extractQueriesIfDirty,
-      },
       invoke: {
         src: `runStaticQueries`,
         id: `running-static-queries`,
@@ -72,9 +58,6 @@ export const queryStates: MachineConfig<IQueryRunningContext, any, any> = {
       },
     },
     runningPageQueries: {
-      // on: {
-      //   "": extractQueriesIfDirty,
-      // },
       invoke: {
         src: `runPageQueries`,
         id: `running-page-queries`,
