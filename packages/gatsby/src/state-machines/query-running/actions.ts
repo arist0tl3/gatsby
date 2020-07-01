@@ -34,6 +34,7 @@ export const assignDirtyQueries = assign<
   DoneInvokeEvent<any>
 >((_context, { data }) => {
   const { queryIds } = data
+  console.log({ queryIds })
   return {
     filesDirty: false,
     queryIds,

@@ -12,8 +12,22 @@ export type DataLayerResult = Pick<
 >
 
 export const dataLayerStates: MachineConfig<IDataLayerContext, any, any> = {
-  initial: `customizingSchema`,
+  initial: `start`,
   states: {
+    start: {
+      on: {
+        "": [
+          {
+            target: `buildingSchema`,
+            cond: ({ skipSourcing }: IDataLayerContext): boolean =>
+              !!skipSourcing,
+          },
+          {
+            target: `customizingSchema`,
+          },
+        ],
+      },
+    },
     customizingSchema: {
       invoke: {
         src: `customizeSchema`,
@@ -44,6 +58,7 @@ export const dataLayerStates: MachineConfig<IDataLayerContext, any, any> = {
       },
     },
     creatingPages: {
+      on: { ADD_NODE_MUTATION: { actions: [`markNodesDirty`, `callApi`] } },
       invoke: {
         id: `creating-pages`,
         src: `createPages`,
@@ -88,7 +103,6 @@ export const dataLayerStates: MachineConfig<IDataLayerContext, any, any> = {
   },
 }
 
-// eslint-disable-next-line new-cap
 export const dataLayerMachine = Machine(dataLayerStates, {
   actions: dataLayerActions,
   services: dataLayerServices,

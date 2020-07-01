@@ -32,11 +32,11 @@ export async function startWebpackServer({
   if (!program || !app) {
     throw new Error(`Missing required params`)
   }
-  let { compiler, webpackActivity, websocketManager } = await startServer(
-    program,
-    app,
-    workerPool
-  )
+  let {
+    compiler,
+    webpackActivity,
+    websocketManager /* , webpackWatching */,
+  } = await startServer(program, app, workerPool)
 
   compiler.hooks.invalid.tap(`log compiling`, function () {
     markWebpackStatusAsPending()
@@ -112,7 +112,7 @@ export async function startWebpackServer({
       enqueueFlush()
       markWebpackStatusAsDone()
       done()
-      resolve({ compiler, websocketManager })
+      resolve({ compiler, websocketManager /* , webpackWatching */ })
     })
   })
 }

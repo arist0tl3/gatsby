@@ -22,7 +22,7 @@ export async function sourceNodes({
   // const currentPages = new Map<string, IGatsbyPage>(store.getState().pages)
   await sourceNodesAndRemoveStaleNodes({
     parentSpan: activity.span,
-    // deferNodeMutation: !!(webhookBody && Object.keys(webhookBody).length), // Coming soon
+    deferNodeMutation: true,
     webhookBody,
   })
 

@@ -1,23 +1,13 @@
-import {
-  assign,
-  AnyEventObject,
-  ActionFunction,
-  AssignAction,
-  DoneInvokeEvent,
-  ActionFunctionMap,
-} from "xstate"
+import { assign, DoneInvokeEvent, ActionFunctionMap } from "xstate"
 import { createGraphQLRunner } from "../../bootstrap/create-graphql-runner"
 import reporter from "gatsby-cli/lib/reporter"
 import { IDataLayerContext } from "./types"
+import { callApi, markNodesDirty } from "../actions"
 
 const concatUnique = <T>(array1: T[] = [], array2: T[] = []): T[] =>
   Array.from(new Set(array1.concat(array2)))
 
-type BuildMachineAction =
-  | ActionFunction<IDataLayerContext, any>
-  | AssignAction<IDataLayerContext, any>
-
-export const assignChangedPages: BuildMachineAction = assign<
+export const assignChangedPages = assign<
   IDataLayerContext,
   DoneInvokeEvent<{
     changedPages: string[]
@@ -30,17 +20,14 @@ export const assignChangedPages: BuildMachineAction = assign<
   }
 })
 
-export const assignGatsbyNodeGraphQL: BuildMachineAction = assign<
-  IDataLayerContext
->({
+export const assignGatsbyNodeGraphQL = assign<IDataLayerContext>({
   gatsbyNodeGraphQLFunction: ({ store }: IDataLayerContext) =>
     store ? createGraphQLRunner(store, reporter) : undefined,
 })
 
-export const dataLayerActions: ActionFunctionMap<
-  IDataLayerContext,
-  AnyEventObject
-> = {
+export const dataLayerActions: ActionFunctionMap<IDataLayerContext, any> = {
   assignChangedPages,
   assignGatsbyNodeGraphQL,
+  callApi,
+  markNodesDirty,
 }

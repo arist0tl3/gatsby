@@ -3,16 +3,11 @@ import report from "gatsby-cli/lib/reporter"
 import chalk from "chalk"
 import telemetry from "gatsby-telemetry"
 import express from "express"
-import { bootstrapSchemaHotReloader } from "../bootstrap/schema-hot-reloader"
-import bootstrapPageHotReloader from "../bootstrap/page-hot-reloader"
 import { initTracer } from "../utils/tracer"
 import db from "../db"
 import { detectPortInUseAndPrompt } from "../utils/detect-port-in-use-and-prompt"
 import onExit from "signal-exit"
 import queryUtil from "../query"
-import queryWatcher from "../query/query-watcher"
-import * as requiresWriter from "../bootstrap/requires-writer"
-import { waitUntilAllJobsComplete } from "../utils/wait-until-jobs-complete"
 import {
   userPassesFeedbackRequestHeuristic,
   showFeedbackRequest,
@@ -22,8 +17,6 @@ import { markWebpackStatusAsPending } from "../utils/webpack-status"
 
 import { IProgram } from "./types"
 import {
-  startWebpackServer,
-  writeOutRequires,
   IBuildContext,
   initialize,
   postBootstrap,
@@ -35,18 +28,24 @@ import { ProgramStatus } from "../redux/types"
 import {
   MachineConfig,
   AnyEventObject,
-  assign,
   Machine,
-  DoneEventObject,
   interpret,
   Actor,
   Interpreter,
+  forwardTo,
 } from "xstate"
-import { DataLayerResult, dataLayerMachine } from "../state-machines/data-layer"
+import { dataLayerMachine } from "../state-machines/data-layer"
 import { IDataLayerContext } from "../state-machines/data-layer/types"
 import { globalTracer } from "opentracing"
 import { IQueryRunningContext } from "../state-machines/query-running/types"
 import { queryRunningMachine } from "../state-machines/query-running"
+import { IWaitingContext } from "../state-machines/waiting/types"
+import {
+  ADD_NODE_MUTATION,
+  runMutationAndMarkDirty,
+} from "../state-machines/shared-transition-configs"
+import { buildActions } from "../state-machines/actions"
+import { waitingMachine } from "../state-machines/waiting"
 
 const tracer = globalTracer()
 
@@ -138,27 +137,31 @@ module.exports = async (program: IProgram): Promise<void> => {
           src: `initialize`,
           onDone: {
             target: `initializingDataLayer`,
-            actions: `assignStoreAndWorkerPool`,
+            actions: [`assignStoreAndWorkerPool`, `spawnMutationListener`],
           },
         },
       },
       initializingDataLayer: {
+        on: {
+          ADD_NODE_MUTATION: runMutationAndMarkDirty,
+        },
         invoke: {
           src: `initializeDataLayer`,
           data: ({ parentSpan, store }: IBuildContext): IDataLayerContext => {
             return { parentSpan, store, firstRun: true }
           },
           onDone: {
-            actions: `assignDataLayer`,
+            actions: `assignServiceResult`,
             target: `finishingBootstrap`,
           },
         },
       },
       finishingBootstrap: {
+        on: {
+          ADD_NODE_MUTATION: runMutationAndMarkDirty,
+        },
         invoke: {
-          src: async ({
-            gatsbyNodeGraphQLFunction,
-          }: IBuildContext): Promise<void> => {
+          src: async (): Promise<void> => {
             // These were previously in `bootstrap()` but are now
             // in part of the state machine that hasn't been added yet
             await postBootstrap({ parentSpan: bootstrapSpan })
@@ -168,14 +171,6 @@ module.exports = async (program: IProgram): Promise<void> => {
 
             startRedirectListener()
             bootstrapSpan.finish()
-
-            // These are the parts that weren't in bootstrap
-
-            // Start the createPages hot reloader.
-            bootstrapPageHotReloader(gatsbyNodeGraphQLFunction)
-
-            // Start the schema hot reloader.
-            bootstrapSchemaHotReloader()
           },
           onDone: {
             target: `runningQueries`,
@@ -183,6 +178,9 @@ module.exports = async (program: IProgram): Promise<void> => {
         },
       },
       runningQueries: {
+        on: {
+          ADD_NODE_MUTATION,
+        },
         invoke: {
           src: `runQueries`,
           data: ({
@@ -207,26 +205,79 @@ module.exports = async (program: IProgram): Promise<void> => {
         },
       },
       doingEverythingElse: {
+        on: {
+          ADD_NODE_MUTATION,
+        },
         invoke: {
-          src: async ({ workerPool, store, app }): Promise<void> => {
+          src: async (): Promise<void> => {
             // All the stuff that's not in the state machine yet
 
-            await writeOutRequires({ store })
             boundActionCreators.setProgramStatus(
               ProgramStatus.BOOTSTRAP_QUERY_RUNNING_FINISHED
             )
 
             await db.saveState()
 
-            await waitUntilAllJobsComplete()
-            requiresWriter.startListener()
             db.startAutosave()
             queryUtil.startListeningToDevelopQueue({
               graphqlTracing: program.graphqlTracing,
             })
-            queryWatcher.startWatchDeletePage()
-
-            await startWebpackServer({ program, app, workerPool })
+          },
+          onDone: {
+            target: `waiting`,
+          },
+        },
+      },
+      startingDevServers: {
+        on: {
+          ADD_NODE_MUTATION,
+        },
+        invoke: {
+          src: `startWebpackServer`,
+          onDone: {
+            target: `waiting`,
+            actions: `assignServers`,
+          },
+          onError: {
+            target: `failed`,
+          },
+        },
+      },
+      waiting: {
+        on: {
+          ADD_NODE_MUTATION: {
+            actions: forwardTo(`waiting`),
+          },
+        },
+        invoke: {
+          id: `waiting`,
+          src: `waitForMutations`,
+          data: ({
+            store,
+            nodeMutationBatch = [],
+          }: IBuildContext): IWaitingContext => {
+            return { store, nodeMutationBatch }
+          },
+          onDone: {
+            // These are mutations added while we were running the last
+            // batch. We'll hold on to them til we've finished this build.
+            actions: `assignServiceResult`,
+            target: `rebuildingPages`,
+          },
+        },
+      },
+      rebuildingPages: {
+        on: {
+          ADD_NODE_MUTATION,
+        },
+        invoke: {
+          src: `initializeDataLayer`,
+          data: ({ parentSpan, store }: IBuildContext): IDataLayerContext => {
+            return { parentSpan, store, firstRun: false, skipSourcing: true }
+          },
+          onDone: {
+            actions: `assignServiceResult`,
+            target: `runningQueries`,
           },
         },
       },
@@ -234,27 +285,14 @@ module.exports = async (program: IProgram): Promise<void> => {
   }
 
   const service = interpret(
-    // eslint-disable-next-line new-cap
     Machine(developConfig, {
       services: {
         initializeDataLayer: dataLayerMachine,
         initialize,
         runQueries: queryRunningMachine,
+        waitForMutations: waitingMachine,
       },
-      actions: {
-        assignStoreAndWorkerPool: assign<IBuildContext, DoneEventObject>(
-          (_context, event) => {
-            const { store, workerPool } = event.data
-            return {
-              store,
-              workerPool,
-            }
-          }
-        ),
-        assignDataLayer: assign<IBuildContext, DoneEventObject>(
-          (_, { data }): DataLayerResult => data
-        ),
-      },
+      actions: buildActions,
     }).withContext({ program, parentSpan: bootstrapSpan, app })
   )
 
