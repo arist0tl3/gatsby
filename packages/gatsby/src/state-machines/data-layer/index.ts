@@ -11,7 +11,7 @@ export type DataLayerResult = Pick<
   | "pagesToDelete"
 >
 
-export const dataLayerStates: MachineConfig<IDataLayerContext, any, any> = {
+const dataLayerStates: MachineConfig<IDataLayerContext, any, any> = {
   initial: `start`,
   states: {
     start: {

@@ -19,7 +19,6 @@ import { IProgram } from "./types"
 import {
   IBuildContext,
   initialize,
-  postBootstrap,
   rebuildSchemaWithSitePage,
   writeOutRedirects,
 } from "../services"
@@ -82,9 +81,9 @@ process.on(`message`, msg => {
   }
 })
 
-const bootstrapSpan = tracer.startSpan(`bootstrap`)
-
 module.exports = async (program: IProgram): Promise<void> => {
+  const bootstrapSpan = tracer.startSpan(`bootstrap`)
+
   // We want to prompt the feedback request when users quit develop
   // assuming they pass the heuristic check to know they are a user
   // we want to request feedback from, and we're not annoying them.
@@ -164,7 +163,6 @@ module.exports = async (program: IProgram): Promise<void> => {
           src: async (): Promise<void> => {
             // These were previously in `bootstrap()` but are now
             // in part of the state machine that hasn't been added yet
-            await postBootstrap({ parentSpan: bootstrapSpan })
             await rebuildSchemaWithSitePage({ parentSpan: bootstrapSpan })
 
             await writeOutRedirects({ parentSpan: bootstrapSpan })
@@ -302,7 +300,7 @@ module.exports = async (program: IProgram): Promise<void> => {
 
   const listeners = new WeakSet()
   service.onTransition(state => {
-    console.log(`Transition to ${JSON.stringify(state.value)}`)
+    report.verbose(`Transition to ${JSON.stringify(state.value)}`)
     // eslint-disable-next-line no-unused-expressions
     service.children?.forEach(child => {
       // We want to ensure we don't attach a listener to the same
@@ -311,7 +309,11 @@ module.exports = async (program: IProgram): Promise<void> => {
 
       if (isInterpreter(child) && !listeners.has(child)) {
         child.onTransition(substate => {
-          console.log(`Transition to`, state.value, `>`, substate.value)
+          report.verbose(
+            `Transition to ${JSON.stringify(state.value)} > ${JSON.stringify(
+              substate.value
+            )}`
+          )
         })
         listeners.add(child)
       }

@@ -21,8 +21,12 @@ export const assignChangedPages = assign<
 })
 
 export const assignGatsbyNodeGraphQL = assign<IDataLayerContext>({
-  gatsbyNodeGraphQLFunction: ({ store }: IDataLayerContext) =>
-    store ? createGraphQLRunner(store, reporter) : undefined,
+  gatsbyNodeGraphQLFunction: ({ store }: IDataLayerContext) => {
+    if (!store) {
+      reporter.panic(`Missing redux store`)
+    }
+    return createGraphQLRunner(store, reporter)
+  },
 })
 
 export const dataLayerActions: ActionFunctionMap<IDataLayerContext, any> = {
